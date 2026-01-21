@@ -11,7 +11,7 @@ from string import capwords
 from typing import Dict, Generator, List, Tuple
 
 import rich
-from hunters import Borge, Hunter, Ozzy, hunter_name_spacing
+from hunters import Borge, Hunter, Knox, Ozzy, hunter_name_spacing
 from tqdm import tqdm
 from units import Boss, Enemy
 
@@ -75,6 +75,8 @@ class SimulationManager():
                 hunter_class = Borge
             case "ozzy":
                 hunter_class = Ozzy
+            case "knox":
+                hunter_class = Knox
         hunter_class(self.hunter_config_dict).show_build()
         if num_processes > 0:
             with ProcessPoolExecutor(max_workers=num_processes) as e:

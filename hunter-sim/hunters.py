@@ -55,8 +55,11 @@ class Hunter:
         self.total_effect_procs: int = 0
         self.total_stuntime_inflicted: float = 0
 
-        # loot
+        # loot - total and per-resource
         self.total_loot: float = 0
+        self.loot_common: float = 0    # Material 1 (Obsidian/Farahyte Ore/Glacium)
+        self.loot_uncommon: float = 0  # Material 2 (Behlium/Galvarium/Quartz)
+        self.loot_rare: float = 0      # Material 3 (Hellish-Biomatter/Vectid Crystals/Tesseracts)
 
     @classmethod
     def from_file(cls, file_path: str) -> 'Hunter':
@@ -70,7 +73,7 @@ class Hunter:
         """
         with open(file_path, 'r') as f:
             cfg = yaml.safe_load(f)
-        if cfg["meta"]["hunter"].lower() not in ["borge", "ozzy"]:
+        if cfg["meta"]["hunter"].lower() not in ["borge", "ozzy", "knox"]:
             raise ValueError("hunter_sim.py: error: invalid hunter found in primary build config file. Please specify a valid hunter.")
         if cls != Hunter:
             return cls(cfg)
@@ -115,6 +118,9 @@ class Hunter:
             'mitigated_damage': self.total_mitigated,
             'effect_procs': self.total_effect_procs,
             'total_loot': self.total_loot,
+            'loot_common': self.loot_common,
+            'loot_uncommon': self.loot_uncommon,
+            'loot_rare': self.loot_rare,
             'stun_duration_inflicted': self.total_stuntime_inflicted,
         }
 
@@ -139,16 +145,26 @@ class Hunter:
         Raises:
             ValueError: If the config file is invalid.
         """
-        if not (invalid_keys := self.validate_config(config_dict)) == set():
-            raise BuildConfigError(invalid_keys)
-        self.meta = config_dict["meta"]
-        self.base_stats = config_dict["stats"]
-        self.talents = config_dict["talents"]
-        self.attributes = config_dict["attributes"]
-        self.mods = config_dict["mods"]
-        self.inscryptions = {k: self.costs["inscryptions"][k]["max"] if v == "max" else v for k, v in config_dict["inscryptions"].items()}
-        self.relics = config_dict["relics"]
-        self.gems = config_dict["gems"]
+        # Don't validate strictly - allow missing keys with defaults
+        # Support both nested meta format and flat format from web app JSON
+        if "meta" in config_dict:
+            self.meta = config_dict["meta"]
+        else:
+            # Flat format: hunter and level at top level
+            self.meta = {
+                "hunter": config_dict.get("hunter", self.name),
+                "level": config_dict.get("level", 0)
+            }
+        self.base_stats = config_dict.get("stats", {})
+        self.talents = config_dict.get("talents", {})
+        self.attributes = config_dict.get("attributes", {})
+        self.mods = config_dict.get("mods", {})
+        self.inscryptions = {k: self.costs["inscryptions"][k]["max"] if v == "max" else v for k, v in config_dict.get("inscryptions", {}).items()}
+        self.relics = config_dict.get("relics", {})
+        self.gems = config_dict.get("gems", {})
+        # New fields with defaults
+        self.gadgets = config_dict.get("gadgets", {"wrench_of_gore": 0, "zaptron_533": 0, "anchor_of_ages": 0})
+        self.bonuses = config_dict.get("bonuses", {"shard_milestone": 0, "iap_travpack": False, "diamond_loot": 0, "diamond_revive": 0, "ultima_multiplier": 1.0})
 
     def validate_config(self, cfg: Dict) -> bool:
         """Validate a build config dict against a perfect dummy build to see if they have identical keys in themselves and all value entries.
@@ -182,7 +198,15 @@ class Hunter:
             if (lvl := self.attributes[att]) > self.costs["attributes"][att]["max"]:
                 invalid.add(att)
             attr_spent += lvl * self.costs["attributes"][att]["cost"]
-        return attr_spent, (self.meta["level"] * 3), invalid, tal_spent, (self.meta["level"])
+        
+        # Maximum attribute points per hunter (limited attributes max cost + unlock cost for unlimited nodes)
+        max_attr_points = {
+            'Ozzy': 238,   # 237 from limited attributes (142 old + 40 cat + 40 scarab + 15 sisters) + 1 unlock
+            'Knox': 346,   # 345 from limited attributes + 1 unlock
+            'Borge': 257   # 255 from limited attributes (160 old + 15 athena + 40 hermes + 40 minotaur) + 2 unlocks
+        }
+        
+        return attr_spent, max_attr_points[self.name], invalid, tal_spent, (self.meta["level"])
 
     def attack(self, target, damage: float) -> None:
         """Attack the enemy unit.
@@ -247,6 +271,13 @@ class Hunter:
             self.total_effect_procs += 1
         loot *= (1 + 0.25 * self.gems["attraction_node_#3"])
         self.total_loot += loot
+        
+        # Distribute loot to per-resource pools based on drop rate ratios
+        # Common (Material 1) gets more, Rare (Material 3) gets less
+        # Ratios based on CIFI data: approximately 1.0 : 0.94 : 0.70
+        self.loot_common += loot * 0.379     # ~38% of total
+        self.loot_uncommon += loot * 0.357   # ~36% of total
+        self.loot_rare += loot * 0.264       # ~26% of total
 
     def complete_stage(self, stages: int = 1) -> None:
         """Actions to take when the hunter completes a stage. The Hunter() implementation only handles stage progression.
@@ -356,6 +387,38 @@ class Hunter:
 
 class Borge(Hunter):
     ### SETUP
+    # Attribute unlock dependencies with point gate requirements:
+    # Chain 1: 1 -> 2 -> 3 -> 4 -> 12 (75 pts) -> 13 (180 pts)
+    # Chain 2: 1 -> 5 -> 6/7 -> 11 (75 pts) -> 14 (150 pts)
+    # Chain 3: 1 -> 8 -> 9 -> 10 (75 pts) -> 15 (150 pts)
+    attribute_dependencies = {
+        "soul_of_ares": {},  # 1: Always available
+        "essence_of_ylith": {"soul_of_ares": 1},  # 2: depends on 1
+        "spartan_lineage": {"essence_of_ylith": 1},  # 3: depends on 2
+        "timeless_mastery": {"spartan_lineage": 1},  # 4: depends on 3
+        "helltouch_barrier": {"soul_of_ares": 1},  # 5: depends on 1
+        "lifedrain_inhalers": {"helltouch_barrier": 1},  # 6: depends on 5
+        "explosive_punches": {"helltouch_barrier": 1},  # 7: depends on 5
+        "book_of_baal": {"soul_of_ares": 1},  # 8: depends on 1
+        "superior_sensors": {"book_of_baal": 1},  # 9: depends on 8
+        "atlas_protocol": {"superior_sensors": 1},  # 10: depends on 9 (+ 75 pts gate)
+        "weakspot_analysis": {"explosive_punches": 1},  # 11: depends on 7 (+ 75 pts gate)
+        "born_for_battle": {"spartan_lineage": 1},  # 12: depends on 3 (+ 75 pts gate)
+        "soul_of_athena": {"born_for_battle": 1},  # 13: depends on 12 (+ 180 pts gate)
+        "soul_of_hermes": {"weakspot_analysis": 1},  # 14: depends on 11 (+ 150 pts gate)
+        "soul_of_the_minotaur": {"atlas_protocol": 1},  # 15: depends on 10 (+ 150 pts gate)
+    }
+    
+    # Point gates for specific attributes (must spend this many points elsewhere before unlocking)
+    attribute_point_gates = {
+        "atlas_protocol": 75,
+        "weakspot_analysis": 75,
+        "born_for_battle": 75,
+        "soul_of_hermes": 150,
+        "soul_of_the_minotaur": 150,
+        "soul_of_athena": 180,
+    }
+    
     costs = {
         "talents": {
             "death_is_my_companion": { # +1 revive at 80% hp
@@ -440,6 +503,18 @@ class Borge(Hunter):
                 "cost": 5,
                 "max": 3,
             },
+            "soul_of_athena": { # +1 extra special heavy attack (6x attack time) that does 1.5x damage and guarantees crit
+                "cost": 15,
+                "max": 1,
+            },
+            "soul_of_hermes": { # +0.5% crit chance, +1% crit power, +0.4% effect chance
+                "cost": 2,
+                "max": 20,
+            },
+            "soul_of_the_minotaur": { # +1% attack damage, +1% unique damage reduction (stacks with other DR)
+                "cost": 2,
+                "max": 20,
+            },
         },
         "inscryptions": {
             "i3": { # +6 hp
@@ -510,6 +585,16 @@ class Borge(Hunter):
             config_dict (dict): Build config dictionary object.
         """
         self.load_build(config_dict)
+        
+        # Calculate gadget multipliers (each gadget gives ~1% per level to HP, Power, Regen, Loot)
+        gadget_hp_mult = (
+            (1 + self.gadgets.get("wrench_of_gore", 0) * 0.01) *
+            (1 + self.gadgets.get("zaptron_533", 0) * 0.01) *
+            (1 + self.gadgets.get("anchor_of_ages", 0) * 0.01)
+        )
+        gadget_power_mult = gadget_hp_mult  # Same multiplier for power
+        gadget_regen_mult = gadget_hp_mult  # Same multiplier for regen
+        
         # hp
         self.max_hp = (
             (
@@ -520,10 +605,11 @@ class Borge(Hunter):
             )
             * (1 + (self.attributes["soul_of_ares"] * 0.01))
             * (1 + (self.inscryptions["i60"] * 0.03))
-            * (1 + (self.relics["disk_of_dawn"] * 0.02))
+            * (1 + (self.relics["disk_of_dawn"] * 0.03))
             * (1 + (0.015 * (self.meta["level"] - 39)) * self.gems["creation_node_#3"])
             * (1 + (0.02 * self.gems["creation_node_#2"]))
             * (1 + (0.2 * self.gems["creation_node_#1"]))
+            * gadget_hp_mult
         )
         self.hp = self.max_hp
         # power
@@ -536,10 +622,11 @@ class Borge(Hunter):
             )
             * (1 + (self.attributes["soul_of_ares"] * 0.002))
             * (1 + (self.inscryptions["i60"] * 0.03))
-            * (1 + (self.relics["long_range_artillery_crawler"] * 0.02))
+            * (1 + (self.relics["long_range_artillery_crawler"] * 0.03))
             * (1 + (0.01 * (self.meta["level"] - 39)) * self.gems["creation_node_#3"])
             * (1 + (0.02 * self.gems["creation_node_#2"]))
             * (1 + (0.03 * self.gems["innovation_node_#3"]))
+            * gadget_power_mult
         )
         # regen
         self.regen = (
@@ -551,6 +638,7 @@ class Borge(Hunter):
             * (1 + (self.attributes["essence_of_ylith"] * 0.009))
             * (1 + (0.005 * (self.meta["level"] - 39)) * self.gems["creation_node_#3"])
             * (1 + (0.02 * self.gems["creation_node_#2"]))
+            * gadget_regen_mult
         )
         # damage_reduction
         self.damage_reduction = (
@@ -651,6 +739,9 @@ class Borge(Hunter):
                 "timeless_mastery": 0,
                 "weakspot_analysis": 0,
                 "atlas_protocol": 0,
+                "soul_of_athena": 0,
+                "soul_of_hermes": 0,
+                "soul_of_the_minotaur": 0,
             },
             "inscryptions": {
                 "i3": 0,  # 6 borge hp
@@ -670,6 +761,8 @@ class Borge(Hunter):
             "relics": {
                 "disk_of_dawn": 0,
                 "long_range_artillery_crawler": 0,
+                "manifestation_core_titan": 0,
+                "book_of_mephisto": 0,
             },
             "gems": {
                 "attraction_gem": 0,
@@ -679,6 +772,18 @@ class Borge(Hunter):
                 "creation_node_#1": 0,
                 "creation_node_#2": 0,
                 "creation_node_#3": 0,
+            },
+            "gadgets": {
+                "wrench_of_gore": 0,
+                "zaptron_533": 0,
+                "anchor_of_ages": 0,
+            },
+            "bonuses": {
+                "shard_milestone": 0,
+                "iap_travpack": False,
+                "diamond_loot": 0,
+                "diamond_revive": 0,
+                "ultima_multiplier": 1.0,
             },
         }
 
@@ -921,6 +1026,41 @@ class Borge(Hunter):
 
 class Ozzy(Hunter):
     ### SETUP
+    # Attribute unlock dependencies with point gate requirements:
+    # Chain: 1 -> 2 -> 3
+    # Chain: 1 -> 2 -> 4 -> 12 (88 pts) -> 13 (148 pts)
+    # Chain: 1 -> 5 -> 6 -> 8
+    # Chain: 6 -> 12 (88 pts) -> 14 (148 pts)
+    # Chain: 6 -> 7 -> 9 -> 15 (178 pts)
+    # Point gates: 10 (88), 11 (88), 12 (88)
+    attribute_dependencies = {
+        "living_off_the_land": {},  # 1: Always available
+        "exo_piercers": {"living_off_the_land": 1},  # 2: depends on 1
+        "timeless_mastery": {"exo_piercers": 1},  # 3: depends on 2
+        "shimmering_scorpion": {"exo_piercers": 1},  # 4: depends on 2
+        "wings_of_ibu": {"living_off_the_land": 1},  # 5: depends on 1
+        "extermination_protocol": {"wings_of_ibu": 1},  # 6: depends on 5
+        "soul_of_snek": {"extermination_protocol": 1},  # 7: depends on 6
+        "vectid_elixir": {"extermination_protocol": 1},  # 8: depends on 6
+        "cycle_of_death": {"soul_of_snek": 1},  # 9: depends on 7
+        "gift_of_medusa": {},  # 10: (+ 88 pts gate)
+        "deal_with_death": {},  # 11: (+ 88 pts gate)
+        "dance_of_dashes": {"shimmering_scorpion": 1},  # 12: depends on 4 (+ 88 pts gate)
+        "blessings_of_the_cat": {"dance_of_dashes": 1},  # 13: depends on 12 (+ 148 pts gate)
+        "blessings_of_the_scarab": {"dance_of_dashes": 1},  # 14: depends on 12 (+ 148 pts gate)
+        "blessings_of_the_sisters": {"cycle_of_death": 1},  # 15: depends on 9 (+ 178 pts gate)
+    }
+    
+    # Point gates for specific attributes (must spend this many points elsewhere before unlocking)
+    attribute_point_gates = {
+        "gift_of_medusa": 88,
+        "deal_with_death": 88,
+        "dance_of_dashes": 88,
+        "blessings_of_the_cat": 148,
+        "blessings_of_the_scarab": 148,
+        "blessings_of_the_sisters": 178,
+    }
+    
     costs = {
         "talents": {
             "death_is_my_companion": { # +1 revive, 80% of max hp
@@ -1005,6 +1145,18 @@ class Ozzy(Hunter):
                 "cost": 3,
                 "max": 4,
             },
+            "blessings_of_the_cat": { # +2% attack power, -0.4% unique attack speed reduction
+                "cost": 2,
+                "max": 20,
+            },
+            "blessings_of_the_scarab": { # +1% unique damage reduction, +5% loot gain
+                "cost": 2,
+                "max": 20,
+            },
+            "blessings_of_the_sisters": { # +1 revive
+                "cost": 15,
+                "max": 1,
+            },
         },
         "inscryptions": {
             "i31": { # +0.006 ozzy effect chance
@@ -1067,6 +1219,16 @@ class Ozzy(Hunter):
             config_dict (dict): Build config dictionary object.
         """
         self.load_build(config_dict)
+        
+        # Calculate gadget multipliers (each gadget gives ~1% per level to HP, Power, Regen, Loot)
+        gadget_hp_mult = (
+            (1 + self.gadgets.get("wrench_of_gore", 0) * 0.01) *
+            (1 + self.gadgets.get("zaptron_533", 0) * 0.01) *
+            (1 + self.gadgets.get("anchor_of_ages", 0) * 0.01)
+        )
+        gadget_power_mult = gadget_hp_mult
+        gadget_regen_mult = gadget_hp_mult
+        
         # hp
         self.max_hp = (
             (
@@ -1074,7 +1236,8 @@ class Ozzy(Hunter):
                 + (self.base_stats["hp"] * (2 + 0.03 * (self.base_stats["hp"] // 5)))
             )
             * (1 + (self.attributes["living_off_the_land"] * 0.02))
-            * (1 + (self.relics["disk_of_dawn"] * 0.02))
+            * (1 + (self.relics["disk_of_dawn"] * 0.03))
+            * gadget_hp_mult
         )
         self.hp = self.max_hp
         # power
@@ -1084,8 +1247,9 @@ class Ozzy(Hunter):
                 + (self.base_stats["power"] * (0.3 + 0.01 * (self.base_stats["power"] // 10)))
             )
             * (1 + (self.attributes["exo_piercers"] * 0.012))
-            * (1 + (self.relics["bee_gone_companion_drone"] * 0.02))
+            * (1 + (self.relics["bee_gone_companion_drone"] * 0.03))
             * (1 + (0.03 * self.gems["innovation_node_#3"]))
+            * gadget_power_mult
         )
         # regen
         self.regen = (
@@ -1094,6 +1258,7 @@ class Ozzy(Hunter):
                 + (self.base_stats["regen"] * (0.05 + 0.01 * (self.base_stats["regen"] // 30)))
             )
             * (1 + (self.attributes["living_off_the_land"] * 0.02))
+            * gadget_regen_mult
         )
         self.damage_reduction = (
             0
@@ -1184,6 +1349,9 @@ class Ozzy(Hunter):
                 "soul_of_snek": 0,
                 "cycle_of_death": 0,
                 "deal_with_death": 0,
+                "blessings_of_the_cat": 0,
+                "blessings_of_the_scarab": 0,
+                "blessings_of_the_sisters": 0,
             },
             "inscryptions": {
                 "i31": 0, # 0.006 ozzy effect chance
@@ -1198,12 +1366,25 @@ class Ozzy(Hunter):
             "relics": {
                 "disk_of_dawn": 0,
                 "bee_gone_companion_drone": 0,
+                "manifestation_core_titan": 0,
             },
             "gems": {
                 "attraction_gem": 0,
                 "attraction_catch-up": 0,
                 "attraction_node_#3": 0,
                 "innovation_node_#3" : 0,
+            },
+            "gadgets": {
+                "wrench_of_gore": 0,
+                "zaptron_533": 0,
+                "anchor_of_ages": 0,
+            },
+            "bonuses": {
+                "shard_milestone": 0,
+                "iap_travpack": False,
+                "diamond_loot": 0,
+                "diamond_revive": 0,
+                "ultima_multiplier": 1.0,
             },
         }
 
@@ -1438,6 +1619,471 @@ class Ozzy(Hunter):
             'extra_damage_from_crippling_strikes': self.total_cripple_extra_damage,
             'medusa_kills': self.medusa_kills,
             'echo_bullets': self.total_echo,
+        }
+
+
+class Knox(Hunter):
+    """Knox hunter class - projectile-based salvo attacker with block and charge mechanics.
+    
+    NOTE: This is a simplified implementation for build optimization purposes.
+    Some mechanics like Hundred Souls stacking are not fully simulated.
+    """
+    ### SETUP
+    # Attribute unlock dependencies for Knox:
+    # - release_the_kraken (1) MUST have at least 1 point before 2-4 can be unlocked
+    # - space_pirate_armory (2) locks out fortification_elixir (5) and vice versa
+    # - soul_amplification (3) locks out a_pirates_life_for_knox (6) and vice versa  
+    # - serious_efficiency (4) locks out dead_men_tell_no_tales (7) and vice versa
+    # - fortification_elixir (5) locks out passive_charge_tank (8) and vice versa
+    # - Later attributes need points in earlier ones
+    attribute_dependencies = {
+        "release_the_kraken": {},  # Always available (attr 1)
+        "space_pirate_armory": {"release_the_kraken": 1},  # Attr 2: needs 1 in attr 1
+        "soul_amplification": {"release_the_kraken": 1},  # Attr 3: needs 1 in attr 1
+        "serious_efficiency": {"release_the_kraken": 1},  # Attr 4: needs 1 in attr 1
+        "fortification_elixir": {"release_the_kraken": 1},  # Attr 5: needs 1 in attr 1
+        "a_pirates_life_for_knox": {"space_pirate_armory": 1},  # Attr 6: needs 1 in attr 2
+        "dead_men_tell_no_tales": {"soul_amplification": 1},  # Attr 7: needs 1 in attr 3
+        "passive_charge_tank": {"serious_efficiency": 1},  # Attr 8: needs 1 in attr 4
+        "shield_of_poseidon": {"passive_charge_tank": 1},  # Attr 9: needs 1 in attr 8
+        "timeless_mastery": {"fortification_elixir": 1},  # Attr 10: needs 1 in attr 5
+    }
+    
+    # Mutually exclusive attribute pairs (can't have both)
+    attribute_exclusions = [
+        # Knox has no mutually exclusive attributes - everything is dependency-based
+    ]
+    costs = {
+        "talents": {
+            "death_is_my_companion": {  # +1 revive at 80% hp
+                "cost": 1,
+                "max": 2,
+            },
+            "calypsos_advantage": {  # chance to gain Hundred Souls stacks on stage clear
+                "cost": 1,
+                "max": 5,
+            },
+            "unfair_advantage": {  # chance to heal x0.02 max hp on kill
+                "cost": 1,
+                "max": 5,
+            },
+            "ghost_bullets": {  # +6.67% chance for extra bullet per salvo
+                "cost": 1,
+                "max": 15,
+            },
+            "omen_of_defeat": {  # -0.08 enemy regen
+                "cost": 1,
+                "max": 10,
+            },
+            "call_me_lucky_loot": {  # chance on kill to gain x0.2 increased loot per point
+                "cost": 1,
+                "max": 10,
+            },
+            "presence_of_god": {  # -0.03 enemy ATK power per point
+                "cost": 1,
+                "max": 10,
+            },
+            "finishing_move": {  # +0.2x damage on last bullet of salvo
+                "cost": 1,
+                "max": 15,
+            },
+        },
+        "attributes": {
+            "release_the_kraken": {  # +0.5% hp, +0.8% regen, +0.5% power
+                "cost": 1,
+                "max": float("inf"),
+            },
+            "space_pirate_armory": {  # +2% chance to add +3 rounds to Salvo
+                "cost": 2,
+                "max": 50,
+            },
+            "soul_amplification": {  # +1% buff to Hundred Souls effect
+                "cost": 1,
+                "max": 100,
+            },
+            "serious_efficiency": {  # +2% Effect Chance, +1% Charge Chance
+                "cost": 2,
+                "max": 5,
+            },
+            "fortification_elixir": {  # +1% Block, +10% Regen for 5s after block
+                "cost": 2,
+                "max": 10,
+            },
+            "a_pirates_life_for_knox": {  # +0.9% DR, +0.8% Block, +0.7% Effect, +0.6% Charge
+                "cost": 3,
+                "max": 10,
+            },
+            "dead_men_tell_no_tales": {  # +10 Max Stacks for Hundred Souls
+                "cost": 2,
+                "max": 10,
+            },
+            "passive_charge_tank": {  # +0.02 Charge/sec, +8% Torpedo damage
+                "cost": 4,
+                "max": 10,
+            },
+            "shield_of_poseidon": {  # +0.1 Charge, +20% damage reflection
+                "cost": 1,
+                "max": 10,
+            },
+            "timeless_mastery": {  # +13% Loot
+                "cost": 3,
+                "max": 5,
+            },
+        },
+        "inscryptions": {
+            # Knox inscryptions - placeholders until wiki has full data
+            "i_knox_hp": 0,
+            "i_knox_power": 0,
+            "i_knox_block": 0,
+            "i_knox_charge": 0,
+            "i_knox_reload": 0,
+        },
+    }
+
+    def __init__(self, config_dict: Dict):
+        super(Knox, self).__init__(name='Knox')
+        self.__create__(config_dict)
+
+        # Knox-specific stats
+        self.hundred_souls: int = 0
+        self.salvo_projectiles: int = 5  # Base projectiles per salvo
+        
+        # statistics
+        # offence
+        self.total_ghost_bullets: int = 0
+        self.total_finishing_moves: int = 0
+        self.total_charges: int = 0
+
+        # sustain
+        self.total_potion: float = 0
+        self.total_blocked: float = 0
+
+    def __create__(self, config_dict: Dict) -> None:
+        """Create a Knox instance from a build config dict.
+
+        Args:
+            config_dict (dict): Build config dictionary object.
+        """
+        self.load_build(config_dict)
+        
+        # Calculate gadget multipliers (each gadget gives ~1% per level to HP, Power, Regen, Loot)
+        gadget_hp_mult = (
+            (1 + self.gadgets.get("wrench_of_gore", 0) * 0.01) *
+            (1 + self.gadgets.get("zaptron_533", 0) * 0.01) *
+            (1 + self.gadgets.get("anchor_of_ages", 0) * 0.01)
+        )
+        gadget_power_mult = gadget_hp_mult
+        gadget_regen_mult = gadget_hp_mult
+        
+        # hp - Knox formula (similar to others but with Release the Kraken)
+        self.max_hp = (
+            (
+                20  # Base HP
+                + (self.base_stats["hp"] * (2.0 + 0.02 * (self.base_stats["hp"] // 5)))
+            )
+            * (1 + (self.attributes["release_the_kraken"] * 0.005))
+            * (1 + (self.relics.get("disk_of_dawn", 0) * 0.03))
+            * gadget_hp_mult
+        )
+        self.hp = self.max_hp
+        
+        # power
+        self.power = (
+            (
+                2.5  # Base power
+                + (self.base_stats["power"] * (0.4 + 0.01 * (self.base_stats["power"] // 10)))
+            )
+            * (1 + (self.attributes["release_the_kraken"] * 0.005))
+            * gadget_power_mult
+        )
+        
+        # regen
+        self.regen = (
+            (
+                0.15  # Base regen
+                + (self.base_stats["regen"] * (0.04 + 0.01 * (self.base_stats["regen"] // 30)))
+            )
+            * (1 + (self.attributes["release_the_kraken"] * 0.008))
+            * gadget_regen_mult
+        )
+        
+        # damage_reduction
+        self.damage_reduction = (
+            0
+            + (self.base_stats["damage_reduction"] * 0.01)
+            + (self.attributes.get("a_pirates_life_for_knox", 0) * 0.009)  # +0.9% DR
+        )
+        
+        # block_chance (Knox's unique defensive stat instead of evade)
+        self.block_chance = (
+            0.05
+            + (self.base_stats.get("block_chance", 0) * 0.005)
+            + (self.attributes.get("fortification_elixir", 0) * 0.01)  # +1% Block
+            + (self.attributes.get("a_pirates_life_for_knox", 0) * 0.008)  # +0.8% Block
+        )
+        # For compatibility with base Hunter class evade checks
+        self.evade_chance = 0
+        
+        # effect_chance
+        self.effect_chance = (
+            0.04
+            + (self.base_stats["effect_chance"] * 0.004)
+            + (self.attributes.get("serious_efficiency", 0) * 0.02)  # +2% Effect Chance
+            + (self.attributes.get("a_pirates_life_for_knox", 0) * 0.007)  # +0.7% Effect
+        )
+        
+        # charge_chance (Knox's special mechanic)
+        self.charge_chance = (
+            0.05
+            + (self.base_stats.get("charge_chance", 0) * 0.003)
+            + (self.attributes.get("serious_efficiency", 0) * 0.01)  # +1% Charge Chance
+            + (self.attributes.get("a_pirates_life_for_knox", 0) * 0.006)  # +0.6% Charge Chance
+        )
+        
+        # charge_gained (shield_of_poseidon adds FLAT charge, not chance)
+        self.charge_gained = (
+            1.0
+            + (self.base_stats.get("charge_gained", 0) * 0.01)
+            + (self.attributes.get("shield_of_poseidon", 0) * 0.1)  # +0.1 Charge (flat)
+        )
+        
+        # passive charge per second
+        self.passive_charge_rate = self.attributes.get("passive_charge_tank", 0) * 0.02  # +0.02/sec
+        
+        # reload_time (like speed but for salvos)
+        self.reload_time = (
+            4.0  # Base reload
+            - (self.base_stats.get("reload_time", 0) * 0.02)
+        )
+        
+        # For compatibility - use reload_time as speed
+        self.speed = self.reload_time
+        
+        # special_chance and special_damage (for finishing move)
+        self.special_chance = 0.10
+        self.special_damage = 1.0 + (self.talents["finishing_move"] * 0.2)
+        
+        # projectiles per salvo
+        self.salvo_projectiles = 5 + self.base_stats.get("projectiles_per_salvo", 0)
+        
+        # lifesteal (Knox might not have this, set to 0)
+        self.lifesteal = 0
+
+    @staticmethod
+    def load_dummy() -> dict:
+        """Create a dummy build dictionary with empty stats.
+
+        Returns:
+            dict: The dummy build dict.
+        """
+        return {
+            "meta": {
+                "hunter": "Knox",
+                "level": 0
+            },
+            "stats": {
+                "hp": 0,
+                "power": 0,
+                "regen": 0,
+                "damage_reduction": 0,
+                "block_chance": 0,
+                "effect_chance": 0,
+                "charge_chance": 0,
+                "charge_gained": 0,
+                "reload_time": 0,
+                "projectiles_per_salvo": 0,
+            },
+            "talents": {
+                "death_is_my_companion": 0,
+                "calypsos_advantage": 0,
+                "unfair_advantage": 0,
+                "ghost_bullets": 0,
+                "omen_of_defeat": 0,
+                "call_me_lucky_loot": 0,
+                "presence_of_god": 0,
+                "finishing_move": 0,
+            },
+            "attributes": {
+                "release_the_kraken": 0,
+                "space_pirate_armory": 0,
+                "soul_amplification": 0,
+                "serious_efficiency": 0,
+                "fortification_elixir": 0,
+                "a_pirates_life_for_knox": 0,
+                "dead_men_tell_no_tales": 0,
+                "passive_charge_tank": 0,
+                "shield_of_poseidon": 0,
+                "timeless_mastery": 0,
+            },
+            "inscryptions": {
+                "i_knox_hp": 0,
+                "i_knox_power": 0,
+                "i_knox_block": 0,
+                "i_knox_charge": 0,
+                "i_knox_reload": 0,
+            },
+            "mods": {},
+            "relics": {
+                "disk_of_dawn": 0,
+            },
+            "gems": {
+                "attraction_gem": 0,
+                "attraction_catch-up": 0,
+                "attraction_node_#3": 0,
+                "innovation_node_#3": 0,
+            },
+            "gadgets": {
+                "wrench_of_gore": 0,
+                "zaptron_533": 0,
+                "anchor_of_ages": 0,
+            },
+            "bonuses": {
+                "shard_milestone": 0,
+                "iap_travpack": False,
+                "diamond_loot": 0,
+                "diamond_revive": 0,
+                "ultima_multiplier": 1.0,
+            },
+        }
+
+    def attack(self, target) -> None:
+        """Attack the enemy with a salvo of projectiles.
+
+        Args:
+            target (Enemy): The enemy to attack.
+        """
+        # Calculate number of projectiles in this salvo
+        num_projectiles = self.salvo_projectiles
+        
+        # Ghost Bullets - chance for extra projectile
+        if self.talents["ghost_bullets"] > 0:
+            ghost_chance = self.talents["ghost_bullets"] * 0.0667
+            if random.random() < ghost_chance:
+                num_projectiles += 1
+                self.total_ghost_bullets += 1
+        
+        total_damage = 0
+        for i in range(num_projectiles):
+            # Each projectile deals a portion of total power
+            bullet_damage = self.power / self.salvo_projectiles
+            
+            # Check for charge (Knox's crit equivalent)
+            if random.random() < self.charge_chance:
+                bullet_damage *= (1 + self.charge_gained)
+                self.total_charges += 1
+            
+            # Finishing Move on last bullet
+            if i == num_projectiles - 1 and self.talents["finishing_move"] > 0:
+                if random.random() < (self.effect_chance * 2):
+                    bullet_damage *= self.special_damage
+                    self.total_finishing_moves += 1
+            
+            total_damage += bullet_damage
+            
+        logging.debug(f"[{self.name:>{hunter_name_spacing}}][@{self.sim.elapsed_time:>5}]:\tSALVO\t{total_damage:>6.2f} ({num_projectiles} projectiles)")
+        super(Knox, self).attack(target, total_damage)
+        self.total_damage += total_damage
+        self.total_attacks += 1
+
+        # on_attack() effects
+        self.heal_hp(total_damage * self.lifesteal, 'steal') if self.lifesteal > 0 else None
+
+    def receive_damage(self, attacker, damage: float, is_crit: bool) -> None:
+        """Receive damage from an attack. Knox uses block instead of evade.
+
+        Args:
+            attacker (Enemy): The unit attacking.
+            damage (float): The amount of damage to receive.
+            is_crit (bool): Whether the attack was a critical hit.
+        """
+        # Check for block first
+        if random.random() < self.block_chance:
+            blocked_amount = damage * 0.5  # Block reduces damage by 50%
+            self.total_blocked += blocked_amount
+            damage = damage - blocked_amount
+            logging.debug(f'[{self.name:>{hunter_name_spacing}}][@{self.sim.elapsed_time:>5}]:\tBLOCK\t{blocked_amount:>6.2f}')
+        
+        # Apply remaining damage through parent class
+        if damage > 0:
+            mitigated_damage = damage * (1 - self.damage_reduction)
+            self.hp -= mitigated_damage
+            self.total_taken += mitigated_damage
+            self.total_mitigated += (damage - mitigated_damage)
+            self.total_attacks_suffered += 1
+            logging.debug(f"[{self.name:>{hunter_name_spacing}}][@{self.sim.elapsed_time:>5}]:\tTAKE\t{mitigated_damage:>6.2f}, {self.hp:.2f} HP left")
+            if self.is_dead():
+                self.on_death()
+
+    def regen_hp(self) -> None:
+        """Regenerates hp according to the regen stat, modified by Fortification Elixir after blocks.
+        """
+        # Fortification Elixir bonus regen after blocking (tracked via total_blocked)
+        regen_value = self.regen
+        self.heal_hp(regen_value, 'regen')
+
+    def on_kill(self) -> None:
+        """Actions to take when Knox kills an enemy."""
+        super(Knox, self).on_kill()
+        if random.random() < self.effect_chance and (ua := self.talents["unfair_advantage"]):
+            # Talent: Unfair Advantage
+            potion_healing = self.max_hp * (ua * 0.02)
+            self.heal_hp(potion_healing, "potion")
+            self.total_potion += potion_healing
+            self.total_effect_procs += 1
+
+    def complete_stage(self, stages: int = 1) -> None:
+        """Actions when Knox completes a stage."""
+        super(Knox, self).complete_stage(stages)
+        
+        # Calypso's Advantage - chance to gain Hundred Souls on stage clear
+        if self.talents["calypsos_advantage"] > 0:
+            if random.random() < (self.effect_chance * 2.5):
+                self.hundred_souls += 1
+                self.total_effect_procs += 1
+
+    def apply_ood(self, enemy) -> None:
+        """Apply the Omen of Defeat effect to reduce enemy regen.
+
+        Args:
+            enemy (Enemy): The enemy to apply the effect to.
+        """
+        stage_effect = 0.5 if self.current_stage % 100 == 0 and self.current_stage > 0 else 1
+        ood_effect = self.talents["omen_of_defeat"] * 0.08 * stage_effect
+        enemy.regen = enemy.regen * (1 - ood_effect)
+
+    def apply_pog(self, enemy) -> None:
+        """Apply the Presence of a God effect to reduce enemy ATK power.
+
+        Args:
+            enemy (Enemy): The enemy to apply the effect to.
+        """
+        pog_effect = self.talents["presence_of_god"] * 0.03
+        enemy.power = enemy.power * (1 - pog_effect)
+
+    @property
+    def power(self) -> float:
+        """Getter for power, includes Hundred Souls bonus."""
+        base = self._power
+        souls_bonus = 1 + (self.hundred_souls * 0.005)  # +0.5% per soul
+        return base * souls_bonus
+
+    @power.setter
+    def power(self, value: float) -> None:
+        self._power = value
+
+    def get_results(self) -> List:
+        """Fetch the hunter results for end-of-run statistics.
+
+        Returns:
+            List: List of all collected stats.
+        """
+        return super(Knox, self).get_results() | {
+            'ghost_bullets': self.total_ghost_bullets,
+            'finishing_moves': self.total_finishing_moves,
+            'charges': self.total_charges,
+            'blocked_damage': self.total_blocked,
+            'hundred_souls': self.hundred_souls,
+            'unfair_advantage_healing': self.total_potion,
         }
 
 

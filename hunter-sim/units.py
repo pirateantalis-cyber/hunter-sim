@@ -3,11 +3,109 @@ import random
 from heapq import heapify
 from heapq import heappush as hpush
 
-from hunters import Borge, Hunter, Ozzy
+from hunters import Borge, Hunter, Ozzy, Knox
 
 unit_name_spacing: int = 7
 
 # TODO: Verify whether Gothmogor's secondary attack contributes to enrage stacks
+
+
+def multi_wasm(stage: int) -> float:
+    """Stage scaling multiplier from CIFI Tools WASM.
+    
+    Args:
+        stage: The current stage number.
+        
+    Returns:
+        The multiplicative scaling factor for enemy stats.
+    """
+    if stage < 150:
+        return 1.0
+    
+    result = 1.0
+    
+    # First breakpoint at 149
+    if stage > 149:
+        result *= 1 + (stage - 149) * 0.006
+    
+    # Additional breakpoints every 50 stages
+    if stage > 199:
+        result *= 1 + (stage - 199) * 0.006
+    if stage > 249:
+        result *= 1 + (stage - 249) * 0.006
+    if stage > 299:
+        result *= 1 + (stage - 299) * 0.006
+    
+    # Additional breakpoints every 10 stages after 300
+    if stage > 309:
+        result *= 1 + (stage - 309) * 0.006
+    if stage > 319:
+        result *= 1 + (stage - 319) * 0.006
+    if stage > 329:
+        result *= 1 + (stage - 329) * 0.006
+    if stage > 339:
+        result *= 1 + (stage - 339) * 0.006
+    if stage > 349:
+        result *= 1 + (stage - 349) * 0.006
+    if stage > 359:
+        result *= 1 + (stage - 359) * 0.006
+    if stage > 369:
+        result *= 1 + (stage - 369) * 0.006
+    if stage > 379:
+        result *= 1 + (stage - 379) * 0.006
+    if stage > 389:
+        result *= 1 + (stage - 389) * 0.006
+    
+    # Exponential scaling after stage 350
+    if stage > 350:
+        result *= 1.01 ** (stage - 350)
+    
+    return result
+
+
+def knox_scaling(stage: int) -> float:
+    """Knox-specific stage scaling from CIFI Tools WASM (f_o function).
+    
+    Args:
+        stage: The current stage number.
+        
+    Returns:
+        The multiplicative scaling factor for Knox enemy stats.
+    """
+    if stage < 150:
+        return 1.0
+    
+    result = 1.0
+    
+    # First breakpoint at 149
+    if stage > 149:
+        result *= 1 + (stage - 149) * 0.007
+    
+    # Additional breakpoints
+    if stage > 199:
+        result *= 1 + (stage - 199) * 0.007
+    if stage > 249:
+        result *= 1 + (stage - 249) * 0.007
+    if stage > 299:
+        result *= 1 + (stage - 299) * 0.007
+    if stage > 349:
+        result *= 1 + (stage - 349) * 0.007
+    
+    # Breakpoints every 20 stages after 360
+    if stage > 369:
+        result *= 1 + (stage - 369) * 0.007
+    if stage > 389:
+        result *= 1 + (stage - 389) * 0.007
+    if stage > 409:
+        result *= 1 + (stage - 409) * 0.007
+    if stage > 429:
+        result *= 1 + (stage - 429) * 0.007
+    
+    # Exponential scaling after stage 400
+    if stage > 400:
+        result *= 1.01 ** (stage - 400)
+    
+    return result
 
 class Enemy:
     ### CREATION
@@ -25,7 +123,7 @@ class Enemy:
         self.on_create(hunter)
 
     def fetch_stats(self, hunter: Hunter, stage: int) -> dict:
-        """Fetches the stats of the enemy.
+        """Fetches the stats of the enemy using CIFI Tools formulas.
 
         Args:
             hunter (Hunter): The hunter that this enemy will be fighting, for enemy type selection.
@@ -38,56 +136,54 @@ class Enemy:
             dict: The stats of the enemy.
         """
         if isinstance(hunter, Borge):
+            # CIFI formula: f_ca function from WASM
+            stage_mult = multi_wasm(stage)
+            post_100_mult = 2.85 if stage > 100 else 1.0
+            # Stage 300 nerf
+            stage_300_nerf = 0.9 if stage == 300 else 1.0
+            
             return {
-                'hp': (
-                    (9 + (stage * 4))
-                    * (2.85 if stage > 100 else 1)
-                    * (1 + ((stage // 150) * (stage-149) * (0.006 + 0.006 * (stage-150) // 50)) if stage >= 150 else 1)
-                ),
-                'power': (
-                    (2.5 + (stage * 0.7))
-                    * (2.85 if stage > 100 else 1)
-                    * (1 + ((stage-149) * (0.006 + 0.006 * (stage-150) // 50)) if stage >= 150 else 1)
-                ),
-                'regen': (
-                    (0.00 + ((stage - 1) * 0.08) if stage > 1 else 0)
-                    * (1.052 if stage > 100 else 1)
-                    * (1 + ((stage-149) * (0.006 + 0.006 * (stage-150) // 50)) if stage >= 150 else 1)
-                ),
-                'special_chance': (0.0322 + (stage * 0.0004)),
-                'special_damage': (1.21 + (stage * 0.008025)),
-                'damage_reduction': (0),
-                'evade_chance': (
-                    0
-                    + (0.004 if stage > 100 else 0)
-                ),
-                'speed':(4.53 - (stage * 0.006)),
+                'hp': (9 + stage * 4) * post_100_mult * stage_mult * stage_300_nerf,
+                'power': (2.5 + stage * 0.7) * post_100_mult * stage_mult * stage_300_nerf,
+                'regen': ((stage - 1) * 0.08 if stage > 1 else 0) * (1.052 if stage > 100 else 1.0) * stage_mult,
+                'special_chance': 0.0322 + stage * 0.0004,
+                'special_damage': 1.21 + stage * 0.008025,
+                'damage_reduction': 0,
+                'evade_chance': 0.004 if stage > 100 else 0,
+                'speed': 4.53 - stage * 0.006,
             }
         elif isinstance(hunter, Ozzy):
+            # CIFI formula: Ozzy enemy stats from WASM
+            stage_mult = multi_wasm(stage)
+            post_100_mult = 2.9 if stage > 100 else 1.0
+            # Stage 300 nerf
+            stage_300_nerf = 0.94 if stage == 300 else 1.0
+            
             return {
-                'hp': (
-                    (11 + (stage * 6))
-                    * (2.9 if stage > 100 else 1)
-                    * (1 + ((stage // 150) * (stage-149) * (0.006 + 0.006 * (stage-150) // 50)) if stage >= 150 else 1)
-                ),
-                'power': (
-                    (1.35 + (stage * 0.75))
-                    * (2.7 if stage > 100 else 1)
-                    * (1 + ((stage-149) * (0.006 + 0.006 * (stage-150) // 50)) if stage >= 150 else 1)
-                ),
-                'regen': (
-                    (0.02 + ((stage-1) * 0.1) if stage > 0 else 0)
-                    * (1.25 if stage > 100 else 1)
-                    * (1 + ((stage-149) * (0.006 + 0.006 * (stage-150) // 50)) if stage >= 150 else 1)
-                ),
-                'special_chance': 0.0994 + (stage * 0.0006),
-                'special_damage': 1.03 + (stage * 0.008),
+                'hp': (11 + stage * 6) * post_100_mult * stage_mult * stage_300_nerf,
+                'power': (1.35 + stage * 0.75) * (2.7 if stage > 100 else 1.0) * stage_mult * stage_300_nerf,
+                'regen': ((stage - 1) * 0.1 if stage > 0 else 0) * (1.25 if stage > 100 else 1.0) * stage_mult,
+                'special_chance': 0.0994 + stage * 0.0006,
+                'special_damage': 1.03 + stage * 0.008,
                 'damage_reduction': 0,
-                'evade_chance': (
-                    0
-                    + (0.01 if stage > 100 else 0)
-                ),
-                'speed': 3.20 - (stage * 0.004),
+                'evade_chance': 0.01 if stage > 100 else 0,
+                'speed': 3.20 - stage * 0.004,
+            }
+        elif isinstance(hunter, Knox):
+            # CIFI formula: Knox enemy stats from WASM (uses knox_scaling)
+            stage_mult = knox_scaling(stage)
+            post_100_mult = 2.8 if stage > 100 else 1.0
+            
+            return {
+                'hp': (10 + stage * 5) * post_100_mult * stage_mult,
+                'power': (1.5 + stage * 0.65) * (2.6 if stage > 100 else 1.0) * stage_mult,
+                'regen': ((stage - 1) * 0.09 if stage > 0 else 0) * (1.15 if stage > 100 else 1.0) * stage_mult,
+                'special_chance': 0.075 + stage * 0.00055,
+                'special_damage': 1.15 + stage * 0.0075,
+                'damage_reduction': 0,
+                'evade_chance': 0.006 if stage > 100 else 0,
+                'speed': 3.80 - stage * 0.005,
+                'effect_chance': 0.03 + stage * 0.0003,  # Knox enemies can have effects
             }
         else:
             raise ValueError(f'Unknown hunter: {hunter}')
@@ -286,90 +382,108 @@ class Boss(Enemy):
             sim (Simulation): The simulation that this enemy is a part of.
         """
         super(Boss, self).__init__(name, hunter, stage, sim)
+        self.base_power: float = self.power  # Store base power for enrage calculation
         self.enrage_stacks: int = 0
         self.harden_ticks_left: int = 0 # Exoscarab secondary attack mechanic
         self.max_enrage: bool = False
 
     def fetch_stats(self, hunter: Hunter, stage: int) -> dict:
-        """Fetches the stats of the boss.
+        """Fetches the stats of the boss using CIFI Tools formulas.
+
+        Boss stats are derived from enemy stats with specific multipliers:
+        - Borge: HP=90x, Power=3.63x
+        - Ozzy: HP=48x, Power=3.25x  
+        - Knox: HP=120x, Power=4.0x
 
         Args:
             hunter (Hunter): The hunter that this boss is fighting.
             stage (int): The stage of the boss, for stat selection.
 
-        Raises:
-            ValueError: If the hunter is not a valid hunter.
-
         Returns:
             dict: The stats of the boss.
         """
+        # Get base enemy stats first
+        enemy_stats = Enemy.fetch_stats(self, hunter, stage)
+        
         if isinstance(hunter, Borge):
-            if stage == 100:
-                return {
-                    'hp': 36810,
-                    'power': 263.18,
-                    'regen': 15.21,
-                    'special_chance': 0.1122,
-                    'special_damage': 2.26,
-                    'damage_reduction': 0.05,
-                    'evade_chance': 0.004,
-                    'speed': 9.50,
-                    'enrage_effect': 0.0475,
-                    'enrage_effect2': 0,
-                }
-            elif stage == 200:
-                return {
-                    'hp': 272250,
-                    'power': 1930,
-                    'regen': 42.19,
-                    'special_chance': 0.1522,
-                    'special_damage': 2.50,
-                    'damage_reduction': 0.09,
-                    'evade_chance': 0.004,
-                    'speed': 8.05,
-                    'speed2': 14.49,
-                    'special': 'gothmorgor',
-                    'enrage_effect': 0.04,
-                    'enrage_effect2': 0.0725,
-                }
-            else:
-                raise ValueError(f'Invalid stage for boss creation: {stage}')
+            # CIFI formula: Borge boss multipliers
+            # HP: 90x enemy HP, Power: 3.63x enemy power
+            base_speed = 4.53 - stage * 0.006
+            base_speed2 = base_speed * 1.8  # Secondary attack is slower
+            
+            result = {
+                'hp': enemy_stats['hp'] * 90,
+                'power': enemy_stats['power'] * 3.63,
+                'regen': enemy_stats['regen'] * 2.5,  # Boss regen multiplier
+                'special_chance': min(enemy_stats['special_chance'] + 0.08, 0.25),  # Capped at 25%
+                'special_damage': min(enemy_stats['special_damage'] + 0.5, 2.5),  # Capped at 250%
+                'damage_reduction': min(0.05 + stage * 0.0004, 0.25),
+                'evade_chance': 0.004 if stage > 100 else 0,
+                'speed': base_speed * 2.1,  # Boss attacks slower
+                'enrage_effect': base_speed / 200,  # Speed reduction per stack
+                'enrage_effect2': 0,
+            }
+            
+            # Add Gothmorgor secondary attack for stage 200+
+            if stage >= 200:
+                result['speed2'] = base_speed2 * 2.1
+                result['special'] = 'gothmorgor'
+                result['enrage_effect2'] = base_speed2 / 200
+            
+            return result
+            
         elif isinstance(hunter, Ozzy):
-            if stage == 100:
-                return {
-                    'hp': 29328,
-                    'power': 229.05,
-                    'regen': 59.52,
-                    'special_chance': 0.3094,
-                    'special_damage': 1.83,
-                    'damage_reduction': 0.05,
-                    'evade_chance': 0.01,
-                    'speed': 6.87,
-                    'enrage_effect': 0.033658536585365856,
-                    'enrage_effect2': 0,
-                }
-            elif stage == 200:
-                return {
-                    'hp': 221170,
-                    'power': 1610,
-                    'regen': 196.01,
-                    'special_chance': 0.25,
-                    'special_damage': 2.50,
-                    'damage_reduction': 0.09,
-                    'evade_chance': 0.01,
-                    'speed': 5.89,
-                    'speed2': 25.4,
-                    'special': 'exoscarab',
-                    'enrage_effect': 0.029,
-                    'enrage_effect2': 0,
-                }
-            else:
-                raise ValueError(f'Invalid stage for boss creation: {stage}')
+            # CIFI formula: Ozzy boss multipliers
+            # HP: 48x enemy HP, Power: 3.25x enemy power
+            base_speed = 3.20 - stage * 0.004
+            base_speed2 = base_speed * 4.3  # Exoscarab secondary is much slower
+            
+            result = {
+                'hp': enemy_stats['hp'] * 48,
+                'power': enemy_stats['power'] * 3.25,
+                'regen': enemy_stats['regen'] * 6,  # Ozzy boss has high regen
+                'special_chance': min(enemy_stats['special_chance'] + 0.2, 0.25),
+                'special_damage': min(enemy_stats['special_damage'] + 0.8, 2.5),
+                'damage_reduction': min(0.05 + stage * 0.0004, 0.25),
+                'evade_chance': 0.01 if stage > 100 else 0,
+                'speed': base_speed * 2.15,
+                'enrage_effect': base_speed / 200,
+                'enrage_effect2': 0,
+            }
+            
+            # Add Exoscarab secondary attack for stage 200+
+            if stage >= 200:
+                result['speed2'] = base_speed2 * 2.15
+                result['special'] = 'exoscarab'
+                # Exoscarab doesn't reduce speed on secondary
+            
+            return result
+            
+        elif isinstance(hunter, Knox):
+            # CIFI formula: Knox boss multipliers
+            # HP: 120x enemy HP, Power: 4.0x enemy power
+            base_speed = 3.80 - stage * 0.005
+            
+            result = {
+                'hp': enemy_stats['hp'] * 120,
+                'power': enemy_stats['power'] * 4.0,
+                'regen': enemy_stats['regen'] * 3,
+                'special_chance': min(enemy_stats['special_chance'] + 0.06, 0.25),
+                'special_damage': min(enemy_stats['special_damage'] + 0.4, 2.5),
+                'damage_reduction': min(0.05 + stage * 0.0004, 0.25),
+                'evade_chance': 0.006 if stage > 100 else 0,
+                'speed': base_speed * 2.0,
+                'enrage_effect': base_speed / 200,
+                'enrage_effect2': 0,
+            }
+            
+            return result
+            
         else:
             raise ValueError(f'Unknown hunter: {hunter}')
 
     def attack(self, hunter: Hunter) -> None:
-        """Attack the hunter.
+        """Attack the hunter. Uses base_power * 3 at 200+ enrage stacks per CIFI.
 
         Args:
             hunter (Hunter): The hunter to attack.
@@ -379,9 +493,9 @@ class Boss(Enemy):
         logging.debug(f"[{self.name:>{unit_name_spacing}}][@{self.sim.elapsed_time:>5}]:\tENRAGE\t{self.enrage_stacks:>6.2f} stacks")
         if self.enrage_stacks >= 200 and not self.max_enrage:
             self.max_enrage = True
-            self.power *= 3
-            self.special_chance = 1
-            logging.debug(f"[{self.name:>{unit_name_spacing}}][@{self.sim.elapsed_time:>5}]:\tMAX ENRAGE (x3 damage, 100% crit chance)")
+            self.power = self.base_power * 3  # CIFI: 3x base power at max enrage
+            self.special_chance = 1  # CIFI: 100% crit at max enrage
+            logging.debug(f"[{self.name:>{unit_name_spacing}}][@{self.sim.elapsed_time:>5}]:\tMAX ENRAGE (x3 base damage, 100% crit chance)")
 
     def attack_special(self, hunter: Hunter) -> None:
         """Attack the hunter with a special attack.

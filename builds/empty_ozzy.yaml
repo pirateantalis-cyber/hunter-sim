@@ -36,6 +36,9 @@ attributes:
   soul_of_snek: 0
   cycle_of_death: 0
   deal_with_death: 0
+  blessings_of_the_cat: 0
+  blessings_of_the_scarab: 0
+  blessings_of_the_sisters: 0
 
 inscryptions:
   i31: 0
@@ -50,9 +53,22 @@ mods: {}
 relics:
   disk_of_dawn: 0
   bee_gone_companion_drone: 0
+  manifestation_core_titan: 0
 
 gems:
   attraction_gem: 0
   attraction_catch-up: 0
   attraction_node_#3: 0
   innovation_node_#3: 0
+
+gadgets:
+  wrench_of_gore: 0
+  zaptron_533: 0
+  anchor_of_ages: 0
+
+bonuses:
+  shard_milestone: 0
+  iap_travpack: false
+  diamond_loot: 0
+  diamond_revive: 0
+  ultima_multiplier: 1.0

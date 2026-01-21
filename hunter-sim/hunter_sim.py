@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from hunters import Hunter, Borge, Ozzy
+from hunters import Hunter, Borge, Knox, Ozzy
 from sim import SimulationManager
 from util.exceptions import BuildConfigError
 
@@ -34,7 +34,7 @@ def main(path: str, compare_path: str, num_sims: int, show_stats: bool, dump_con
         print("hunter_sim.py: error: logging can only be enabled without console output. Run without `-v` to disable console output.")
         sys.exit(1)
     if dump_config:
-        for fn, cls in [('empty_borge.yaml', Borge), ('empty_ozzy.yaml', Ozzy)]:
+        for fn, cls in [('empty_borge.yaml', Borge), ('empty_ozzy.yaml', Ozzy), ('empty_knox.yaml', Knox)]:
             build_dir = os.path.join(os.getcwd(), 'builds')
             Path(build_dir).mkdir(parents=True, exist_ok=True)
             with open(os.path.join(build_dir, fn), 'w') as f:
