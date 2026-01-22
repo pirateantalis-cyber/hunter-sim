@@ -1088,6 +1088,15 @@ class HunterTab:
             
             text = scrolledtext.ScrolledText(frame, height=20, font=('Consolas', 9))
             text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # Configure color tags for rankings
+            text.tag_config("gold", foreground="#FFD700", font=('Consolas', 9, 'bold'))  # 1st place
+            text.tag_config("silver", foreground="#C0C0C0", font=('Consolas', 9, 'bold'))  # 2nd place
+            text.tag_config("bronze", foreground="#CD7F32", font=('Consolas', 9, 'bold'))  # 3rd place
+            text.tag_config("header", foreground=self.colors["primary"], font=('Consolas', 10, 'bold'))
+            text.tag_config("metric", foreground="#00FF00", font=('Consolas', 9, 'bold'))  # Green for values
+            text.tag_config("irl", foreground="#FF6B6B", font=('Consolas', 9, 'italic'))  # Red for IRL build
+            
             self.result_tabs[key] = text
     
     def _log(self, message: str):
@@ -1727,13 +1736,7 @@ class HunterTab:
             )
             
             # Rust sim returns stats at top level, not nested
-            # Calculate per-resource loot from total loot using ratios
-            avg_loot = result.get("avg_loot", 0)
-            # Resource distribution: ~37.9% common, ~35.7% uncommon, ~26.4% rare
-            avg_loot_common = avg_loot * 0.379
-            avg_loot_uncommon = avg_loot * 0.357
-            avg_loot_rare = avg_loot * 0.264
-            
+            # Use per-resource loot values directly from Rust (WASM formulas)
             return BuildResult(
                 talents=config.get("talents", {}).copy(),
                 attributes=config.get("attributes", {}).copy(),
@@ -1751,10 +1754,10 @@ class HunterTab:
                 boss3_survival=result.get("boss3_survival", 0),
                 boss4_survival=result.get("boss4_survival", 0),
                 boss5_survival=result.get("boss5_survival", 0),
-                avg_loot_common=avg_loot_common,
-                avg_loot_uncommon=avg_loot_uncommon,
-                avg_loot_rare=avg_loot_rare,
-                avg_xp=result.get("avg_xp", 0),  # XP tracking
+                avg_loot_common=result.get("avg_loot_common", 0),
+                avg_loot_uncommon=result.get("avg_loot_uncommon", 0),
+                avg_loot_rare=result.get("avg_loot_rare", 0),
+                avg_xp=result.get("avg_xp", 0),
                 config=config,
             )
         except Exception as e:
@@ -1773,12 +1776,7 @@ class HunterTab:
             # Convert to BuildResult objects
             build_results = []
             for config, result in zip(configs, results):
-                # Calculate per-resource loot from total loot using ratios
-                avg_loot = result.get("avg_loot", 0)
-                avg_loot_common = avg_loot * 0.379
-                avg_loot_uncommon = avg_loot * 0.357
-                avg_loot_rare = avg_loot * 0.264
-                
+                # Use per-resource loot values directly from Rust (WASM formulas)
                 build_results.append(BuildResult(
                     talents=config.get("talents", {}).copy(),
                     attributes=config.get("attributes", {}).copy(),
@@ -1796,9 +1794,9 @@ class HunterTab:
                     boss3_survival=result.get("boss3_survival", 0),
                     boss4_survival=result.get("boss4_survival", 0),
                     boss5_survival=result.get("boss5_survival", 0),
-                    avg_loot_common=avg_loot_common,
-                    avg_loot_uncommon=avg_loot_uncommon,
-                    avg_loot_rare=avg_loot_rare,
+                    avg_loot_common=result.get("avg_loot_common", 0),
+                    avg_loot_uncommon=result.get("avg_loot_uncommon", 0),
+                    avg_loot_rare=result.get("avg_loot_rare", 0),
                     avg_xp=result.get("avg_xp", 0),
                     config=config,
                 ))
@@ -2166,26 +2164,77 @@ class HunterTab:
             
             all_text.insert(tk.END, "\n" + "=" * 60 + "\n\n")
         
-        all_text.insert(tk.END, f"TOP 20 {self.hunter_name.upper()} BUILDS\n")
+        all_text.insert(tk.END, f"TOP 20 {self.hunter_name.upper()} BUILDS\n", "header")
         all_text.insert(tk.END, "=" * 60 + "\n\n")
         
+        # Get best stage for star rating comparison
+        best_stage = by_stage[0].avg_final_stage if by_stage else 0
+        
         for i, result in enumerate(by_stage[:20], 1):
-            all_text.insert(tk.END, f"#{i}\n")
+            # Medals for top 3
+            if i == 1:
+                all_text.insert(tk.END, "🥇 ", "gold")
+            elif i == 2:
+                all_text.insert(tk.END, "🥈 ", "silver")
+            elif i == 3:
+                all_text.insert(tk.END, "🥉 ", "bronze")
+            else:
+                all_text.insert(tk.END, f"#{i} ")
+            
+            # Star rating based on % of best
+            if best_stage > 0:
+                pct = (result.avg_final_stage / best_stage) * 100
+                if pct >= 99:
+                    stars = "⭐⭐⭐⭐⭐"  # 5 stars - top tier
+                elif pct >= 95:
+                    stars = "⭐⭐⭐⭐"    # 4 stars - excellent
+                elif pct >= 90:
+                    stars = "⭐⭐⭐"      # 3 stars - good
+                elif pct >= 80:
+                    stars = "⭐⭐"        # 2 stars - average
+                else:
+                    stars = "⭐"          # 1 star - below average
+                all_text.insert(tk.END, f"{stars}\n")
+            else:
+                all_text.insert(tk.END, "\n")
+            
             all_text.insert(tk.END, self._format_build_result(result))
             all_text.insert(tk.END, "\n\n")
         
         all_text.configure(state=tk.DISABLED)
     
     def _display_category(self, text_widget, results: List[BuildResult], metric_name: str, metric_fn):
-        """Display results for a category."""
+        """Display results for a category with color-coded rankings."""
         text_widget.configure(state=tk.NORMAL)
         text_widget.delete(1.0, tk.END)
         
-        text_widget.insert(tk.END, f"TOP 10 BY {metric_name.upper()}\n")
+        # Header with color
+        text_widget.insert(tk.END, f"TOP 10 BY {metric_name.upper()}\n", "header")
         text_widget.insert(tk.END, "=" * 50 + "\n\n")
         
         for i, result in enumerate(results, 1):
-            text_widget.insert(tk.END, f"#{i}: {metric_name} = {metric_fn(result)}\n")
+            # Determine medal and color tag based on ranking
+            if i == 1:
+                medal = "🥇"
+                tag = "gold"
+            elif i == 2:
+                medal = "🥈"
+                tag = "silver"
+            elif i == 3:
+                medal = "🥉"
+                tag = "bronze"
+            else:
+                medal = f"#{i}"
+                tag = None
+            
+            # Insert ranking line with medal and color
+            if tag:
+                text_widget.insert(tk.END, f"{medal} {metric_name} = ", tag)
+                text_widget.insert(tk.END, f"{metric_fn(result)}\n", "metric")
+            else:
+                text_widget.insert(tk.END, f"{medal}: {metric_name} = ")
+                text_widget.insert(tk.END, f"{metric_fn(result)}\n", "metric")
+            
             text_widget.insert(tk.END, self._format_build_result(result))
             text_widget.insert(tk.END, "\n\n")
         
@@ -2270,20 +2319,25 @@ class MultiHunterGUI:
         self.main_notebook = ttk.Notebook(self.root)
         self.main_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Create hunter tabs with colors
+        # Initialize hunter_tabs dict BEFORE creating control tab (which references it)
         self.hunter_tabs: Dict[str, HunterTab] = {}
         
-        for name, cls in [("Borge", Borge), ("Knox", Knox), ("Ozzy", Ozzy)]:
+        # Create control tab frame FIRST (so it's first in notebook)
+        self.control_frame = ttk.Frame(self.main_notebook)
+        self.main_notebook.add(self.control_frame, text="  ⚙️ Control  ")
+        
+        # Create hunter tabs with colors in order: Borge, Ozzy, Knox
+        for name, cls in [("Borge", Borge), ("Ozzy", Ozzy), ("Knox", Knox)]:
             self.hunter_tabs[name] = HunterTab(self.main_notebook, name, cls, self)
             # Color the tab text
             colors = HUNTER_COLORS[name]
-            idx = len(self.hunter_tabs) - 1
+            idx = self.main_notebook.index("end") - 1
             # Use colored icons in tab names
             icon = '🛡️' if name == 'Borge' else '🔫' if name == 'Knox' else '🐙'
             self.main_notebook.tab(idx, text=f"  {icon} {name}  ")
         
-        # Add control tab
-        self._create_control_tab()
+        # Now populate the control tab (hunter_tabs exists now)
+        self._populate_control_tab()
     
     def _setup_styles(self):
         """Configure ttk styles with hunter colors."""
@@ -2320,10 +2374,9 @@ class MultiHunterGUI:
             style.configure(f"{hunter}.TButton",
                           foreground=colors["dark"])
     
-    def _create_control_tab(self):
-        """Create the control tab for running all hunters."""
-        control_frame = ttk.Frame(self.main_notebook)
-        self.main_notebook.add(control_frame, text="  ⚙️ Control  ")
+    def _populate_control_tab(self):
+        """Populate the control tab for running all hunters."""
+        control_frame = self.control_frame  # Use the pre-created frame
         
         # Split into left (settings) and right (battle arena)
         left_frame = ttk.Frame(control_frame)
@@ -2927,7 +2980,7 @@ class MultiHunterGUI:
             is_running = tab.is_running
             
             if is_running and not was_running:
-                # Hunter just started - walk onto field
+                # Hunter just started - walk onto field AND RESET ARENA
                 hunter["on_field"] = True
                 hunter["returning_to_bench"] = False
                 # Assign a good field position for this hunter
@@ -2938,11 +2991,26 @@ class MultiHunterGUI:
                 else:  # Ozzy
                     hunter["field_position"] = {"x": 250, "y": (self.field_top + self.field_bottom) // 2 + 30}
                     
-                # Sync arena stage to hunter's best avg stage (scaled down)
-                if hunter.get("last_avg_stage", 0) > 0:
-                    # Use last avg stage / 10 as arena stage (so stage 500 -> arena stage 50)
-                    self.arena_stage = max(1, int(hunter["last_avg_stage"] / 10))
-                    self.kills_for_next_stage = self.arena_stage * 15
+                # RESET arena to stage 1 when any new run starts
+                self.arena_stage = 1
+                self.kills_for_next_stage = 15
+                self.arena_total_kills = 0
+                
+                # Reset all hunters' kills and stats
+                for h in self.arena_hunters.values():
+                    h["kills"] = 0
+                    h["hp"] = h["max_hp"]
+                    h["level"] = 1
+                    h["xp"] = 0
+                    h["damage"] = h["base_damage"]
+                
+                # Clear enemies and spawn fresh ones
+                self.arena_enemies.clear()
+                self.arena_effects.clear()
+                self.arena_projectiles.clear()
+                self.boss_active = False
+                for _ in range(4):
+                    self._spawn_enemy()
                     
             elif not is_running and was_running:
                 # Hunter just finished - update their results and trigger victory
@@ -2964,6 +3032,42 @@ class MultiHunterGUI:
                     self.victory_timer = 60  # ~3 seconds of celebration
             
             self.prev_running[name] = is_running
+        
+        # SYNC ARENA STAGE WITH SIMULATION PROGRESS
+        # When any hunter is running, sync arena stage to their best_avg_stage (scaled down)
+        if running_hunters:
+            # Get the highest best_avg_stage from all running hunters
+            max_sim_stage = 0
+            for name in running_hunters:
+                tab = self.hunter_tabs[name]
+                # Check if tab has best_avg_stage attribute (set during optimization)
+                if hasattr(tab, 'best_avg_stage') and tab.best_avg_stage > 0:
+                    max_sim_stage = max(max_sim_stage, tab.best_avg_stage)
+            
+            # Scale simulation stage to arena stage (1:10 ratio)
+            # e.g., sim stage 500 -> arena stage 50
+            if max_sim_stage > 0:
+                target_arena_stage = max(1, int(max_sim_stage / 10))
+                # Gradually increase arena stage toward target (smooth progression)
+                if target_arena_stage > self.arena_stage:
+                    old_stage = self.arena_stage
+                    self.arena_stage = target_arena_stage
+                    self.kills_for_next_stage = self.arena_stage * 15
+                    
+                    # Scale hunter stats to match their power at this stage
+                    for h_name, hunter in self.arena_hunters.items():
+                        if hunter.get("on_field"):
+                            stage_mult = self._multi_wasm_arena(self.arena_stage)
+                            hunter["damage"] = hunter["base_damage"] * stage_mult * (1 + hunter["level"] * 0.15)
+                            hunter["max_hp"] = int(hunter["max_hp"] * (1 + (self.arena_stage - old_stage) * 0.05))
+                            hunter["hp"] = min(hunter["hp"] + 20, hunter["max_hp"])  # Heal a bit on stage up
+                    
+                    # Spawn effect to show stage increase
+                    self.arena_effects.append({
+                        "x": self.arena_width // 2, "y": 50, 
+                        "icon": f"📈 Stage {self.arena_stage}!", "ttl": 30, "is_text": True,
+                        "color": "#FFD700", "float": True
+                    })
         
         # Draw themed background
         canvas.configure(bg=theme["bg_color"])

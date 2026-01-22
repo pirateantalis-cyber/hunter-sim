@@ -614,10 +614,32 @@ impl Hunter {
         }
     }
     
-    /// Calculate loot for the current stage
-    pub fn calculate_loot(&self) -> f64 {
-        // Base loot scales with stage
-        let base_loot = 1.0 + self.current_stage as f64 * 0.1;
-        base_loot * self.loot_mult
+    /// Calculate loot for the current stage using WASM formulas
+    /// Returns (mat1, mat2, mat3, xp)
+    pub fn calculate_loot(&self) -> (f64, f64, f64, f64) {
+        let stage = self.current_stage as f64;
+        let mult = self.loot_mult;
+        
+        // WASM-based per-resource loot formulas:
+        // Mat1: stage * 0.3 * avg(1.686) / divisor(1.4558) = stage * 0.347
+        // Mat2: stage * 0.3 * avg(1.6) / divisor(1.4558) = stage * 0.330
+        // Mat3: stage * 0.3 * avg(1.2) / divisor(1.4558) = stage * 0.247
+        let mat1 = stage * 0.347 * mult;
+        let mat2 = stage * 0.330 * mult;
+        let mat3 = stage * 0.247 * mult;
+        
+        // XP: stage * 0.1 * avg(1.1) / divisor(1.4558) = stage * 0.0755
+        let xp_bonus = self.get_xp_bonus();
+        let xp = stage * 0.0755 * mult * xp_bonus;
+        
+        (mat1, mat2, mat3, xp)
+    }
+    
+    /// Get XP bonus multiplier from inscryptions
+    pub fn get_xp_bonus(&self) -> f64 {
+        // Currently only Ozzy has XP inscription (i33 = +75% per level)
+        // This would need inscryption tracking to implement properly
+        // For now return 1.0 (no bonus)
+        1.0
     }
 }

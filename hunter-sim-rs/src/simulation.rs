@@ -182,9 +182,14 @@ pub fn run_simulation_with_rng(config: &BuildConfig, rng: &mut impl Rng) -> SimR
             hunter.result.kills += 1;
         }
         
-        // Stage complete
+        // Stage complete - calculate per-resource loot
         on_stage_complete(&mut hunter, rng);
-        total_loot += hunter.calculate_loot();
+        let (mat1, mat2, mat3, xp) = hunter.calculate_loot();
+        hunter.result.loot_common += mat1;
+        hunter.result.loot_uncommon += mat2;
+        hunter.result.loot_rare += mat3;
+        hunter.result.total_xp += xp;
+        total_loot += mat1 + mat2 + mat3;
         hunter.current_stage += 1;
         
         // Safety check - don't run forever

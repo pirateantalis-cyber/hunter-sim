@@ -11,6 +11,11 @@ pub struct SimResult {
     pub damage: f64,
     pub damage_taken: f64,
     pub total_loot: f64,
+    // Per-resource loot (WASM formulas)
+    pub loot_common: f64,    // Mat1 - Obsidian
+    pub loot_uncommon: f64,  // Mat2 - Behlium
+    pub loot_rare: f64,      // Mat3 - Hellish-Biomatter
+    pub total_xp: f64,       // XP earned
     pub attacks: i32,
     pub crits: i32,
     pub extra_damage_from_crits: f64,
@@ -61,6 +66,11 @@ pub struct AggregatedStats {
     pub boss3_survival: f64,  // % that reached stage > 300
     pub boss4_survival: f64,  // % that reached stage > 400
     pub boss5_survival: f64,  // % that reached stage > 500
+    // Per-resource loot averages (WASM formulas)
+    pub avg_loot_common: f64,
+    pub avg_loot_uncommon: f64,
+    pub avg_loot_rare: f64,
+    pub avg_xp: f64,
 }
 
 impl AggregatedStats {
@@ -130,6 +140,10 @@ impl AggregatedStats {
             boss3_survival: boss3_passed as f64 / n,
             boss4_survival: boss4_passed as f64 / n,
             boss5_survival: boss5_passed as f64 / n,
+            avg_loot_common: results.iter().map(|r| r.loot_common).sum::<f64>() / n,
+            avg_loot_uncommon: results.iter().map(|r| r.loot_uncommon).sum::<f64>() / n,
+            avg_loot_rare: results.iter().map(|r| r.loot_rare).sum::<f64>() / n,
+            avg_xp: results.iter().map(|r| r.total_xp).sum::<f64>() / n,
         }
     }
 }

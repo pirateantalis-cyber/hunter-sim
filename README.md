@@ -83,10 +83,7 @@ cargo build --release
 
 ### IRL Max Stage
 
-Set this to your actual best stage in-game. The optimizer will show a comparison:
-- ✅ **Green** builds beat your current IRL stage
-- ⚠️ **Yellow** builds match your IRL stage  
-- ❌ **Red** builds are worse than your current build
+Set this to your actual best stage in-game. The optimizer will compare simulated results to your real performance.
 
 ## 📁 Project Structure
 

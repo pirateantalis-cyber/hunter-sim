@@ -170,6 +170,8 @@ def simulate(
     Returns:
         Dictionary with aggregated simulation statistics
     """
+    global _native_lib, _using_native
+    
     # Build config object
     config = {
         "meta": {
@@ -179,18 +181,18 @@ def simulate(
         "stats": stats,
         "talents": talents,
         "attributes": attributes,
+        "inscryptions": inscryptions or {},
+        "mods": mods or {},
+        "relics": relics or {},
+        "gems": gems or {},
     }
     
-    if inscryptions:
-        config["inscryptions"] = inscryptions
-    if mods:
-        config["mods"] = mods
-    if relics:
-        config["relics"] = relics
-    if gems:
-        config["gems"] = gems
+    # Use native bindings with direct JSON (much faster, no temp file!)
+    if _using_native and _native_lib is not None:
+        result_json = _native_lib.simulate(json.dumps(config), num_sims, parallel)
+        return json.loads(result_json)
     
-    # Write to temp file
+    # Fallback: write to temp file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
         yaml.dump(config, f)
         temp_path = f.name
