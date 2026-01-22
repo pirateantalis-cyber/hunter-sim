@@ -2360,17 +2360,35 @@ class MultiHunterGUI:
     def _save_global_bonuses(self, *args):
         """Save global bonuses to file."""
         try:
+            # Get values with fallbacks for invalid intermediate states during typing
+            try:
+                shard = self.global_shard_milestone.get()
+            except (tk.TclError, ValueError):
+                return  # Skip save during invalid typing
+            try:
+                diamond = self.global_diamond_loot.get()
+            except (tk.TclError, ValueError):
+                return
+            try:
+                iap = self.global_iap_travpack.get()
+            except (tk.TclError, ValueError):
+                return
+            try:
+                ultima = self.global_ultima_multiplier.get()
+            except (tk.TclError, ValueError):
+                return  # Skip save during invalid typing (e.g., "1.." while typing "1.05")
+            
             config = {
-                "shard_milestone": self.global_shard_milestone.get(),
-                "diamond_loot": self.global_diamond_loot.get(),
-                "iap_travpack": self.global_iap_travpack.get(),
-                "ultima_multiplier": self.global_ultima_multiplier.get()
+                "shard_milestone": shard,
+                "diamond_loot": diamond,
+                "iap_travpack": iap,
+                "ultima_multiplier": ultima
             }
             IRL_BUILDS_PATH.mkdir(exist_ok=True)
             with open(GLOBAL_BONUSES_FILE, 'w') as f:
                 json.dump(config, f, indent=2)
-        except Exception as e:
-            print(f"Failed to save global bonuses: {e}")
+        except Exception:
+            pass  # Silently ignore save errors during typing
     
     def _load_global_bonuses(self):
         """Load global bonuses from file."""
