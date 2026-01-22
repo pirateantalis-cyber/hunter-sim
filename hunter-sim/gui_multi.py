@@ -55,6 +55,9 @@ except ImportError:
 # Path to IRL Builds folder
 IRL_BUILDS_PATH = Path(__file__).parent / "IRL Builds"
 
+# Path to global bonuses config file
+GLOBAL_BONUSES_FILE = IRL_BUILDS_PATH / "global_bonuses.json"
+
 # Path to assets folder (portraits are in parent directory)
 ASSETS_PATH = Path(__file__).parent.parent  # Parent of hunter-sim folder
 
@@ -345,18 +348,9 @@ class HunterTab:
             except ValueError:
                 config["gadgets"][key] = 0
         
-        # Bonuses
-        for key, entry in self.bonus_entries.items():
-            try:
-                if key == "ultima_multiplier":
-                    config["bonuses"][key] = float(entry.get())
-                else:
-                    config["bonuses"][key] = int(entry.get())
-            except ValueError:
-                config["bonuses"][key] = 0 if key != "ultima_multiplier" else 1.0
-        
-        for key, var in self.bonus_vars.items():
-            config["bonuses"][key] = var.get()
+        # Bonuses are saved globally, not per-hunter
+        # Just save empty bonuses dict for backward compatibility
+        config["bonuses"] = {}
         
         return config
     
@@ -2363,6 +2357,35 @@ class MultiHunterGUI:
             style.configure(f"{hunter}.TButton",
                           foreground=colors["dark"])
     
+    def _save_global_bonuses(self, *args):
+        """Save global bonuses to file."""
+        try:
+            config = {
+                "shard_milestone": self.global_shard_milestone.get(),
+                "diamond_loot": self.global_diamond_loot.get(),
+                "iap_travpack": self.global_iap_travpack.get(),
+                "ultima_multiplier": self.global_ultima_multiplier.get()
+            }
+            IRL_BUILDS_PATH.mkdir(exist_ok=True)
+            with open(GLOBAL_BONUSES_FILE, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            print(f"Failed to save global bonuses: {e}")
+    
+    def _load_global_bonuses(self):
+        """Load global bonuses from file."""
+        if GLOBAL_BONUSES_FILE.exists():
+            try:
+                with open(GLOBAL_BONUSES_FILE, 'r') as f:
+                    config = json.load(f)
+                self.global_shard_milestone.set(config.get("shard_milestone", 0))
+                self.global_diamond_loot.set(config.get("diamond_loot", 0))
+                self.global_iap_travpack.set(config.get("iap_travpack", False))
+                self.global_ultima_multiplier.set(config.get("ultima_multiplier", 1.0))
+                self._log("✅ Loaded global bonuses")
+            except Exception as e:
+                self._log(f"⚠️ Failed to load global bonuses: {e}")
+    
     def _populate_control_tab(self):
         """Populate the control tab for running all hunters."""
         control_frame = self.control_frame  # Use the pre-created frame
@@ -2529,6 +2552,13 @@ class MultiHunterGUI:
         ttk.Entry(bonuses_row2, textvariable=self.global_ultima_multiplier, width=6).pack(side=tk.LEFT, padx=5)
         ttk.Label(bonuses_row2, text="(Enter displayed bonus, not upgrade level)", 
                   font=('Arial', 8), foreground='gray').pack(side=tk.LEFT, padx=5)
+        
+        # Load saved global bonuses, then set up auto-save traces
+        self._load_global_bonuses()
+        self.global_shard_milestone.trace_add("write", self._save_global_bonuses)
+        self.global_diamond_loot.trace_add("write", self._save_global_bonuses)
+        self.global_iap_travpack.trace_add("write", self._save_global_bonuses)
+        self.global_ultima_multiplier.trace_add("write", self._save_global_bonuses)
         
         # ============ RUN CONTROLS ============
         run_frame = ttk.LabelFrame(scrollable, text="🚀 Run Optimizations")
