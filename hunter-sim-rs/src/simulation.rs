@@ -570,14 +570,17 @@ fn enemy_attack(hunter: &mut Hunter, enemy: &mut Enemy, rng: &mut impl Rng) {
 
 /// Run multiple simulations in parallel with proper thread utilization
 pub fn run_simulations_parallel(config: &BuildConfig, count: usize) -> Vec<SimResult> {
-    // Use 12 threads per hunter (~55% of 22 cores)
+    // Use ~55% of available cores per hunter to allow multi-hunter parallelism
+    let num_cores = num_cpus::get();
+    let threads_per_hunter = (num_cores * 55 / 100).max(1);
+    
     let pool = ThreadPoolBuilder::new()
-        .num_threads(12)
+        .num_threads(threads_per_hunter)
         .build()
         .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
     
     pool.install(|| {
-        let chunk_size = (count / 12).max(1);
+        let chunk_size = (count / threads_per_hunter).max(1);
         
         (0..count)
             .into_par_iter()

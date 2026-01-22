@@ -11,7 +11,7 @@ A high-performance build optimizer for the Interstellar Hunt content from CIFI (
 - **IRL Build comparison** - compare optimized builds against your current in-game build
 
 ### High-Performance Rust Backend
-- **22-core parallelization** using native Rust via PyO3
+- **Multi-core parallelization** using native Rust via PyO3 (auto-detects available cores)
 - **100+ simulations per second** per build
 - **Progressive evolution algorithm** - builds on the best performers from each tier
 
