@@ -1402,11 +1402,26 @@ class HunterTab:
                 consecutive_dupes = 0
                 
                 # Validate points spent - must use at least 95% of available points
+                # BUT cap at what's actually spendable (some hunters have limited talent pools)
                 talent_spent = sum(talents.values())
                 attr_costs_local = {a: tier_generator.costs["attributes"][a]["cost"] for a in attrs}
                 attr_spent = sum(attrs[a] * attr_costs_local[a] for a in attrs)
                 
-                if talent_spent < tier_talent_points * 0.95 or attr_spent < tier_attr_points * 0.95:
+                # Calculate max possible talent spend (sum of LIMITED talent maxes only)
+                # Unlimited talents (inf) don't count toward the cap
+                max_possible_talents = sum(
+                    int(tier_generator.costs["talents"][t]["max"]) 
+                    for t in tier_generator.costs["talents"]
+                    if tier_generator.costs["talents"][t]["max"] != float('inf')
+                )
+                # With unlimited talents available, we can always spend all points
+                if any(tier_generator.costs["talents"][t]["max"] == float('inf') 
+                       for t in tier_generator.costs["talents"]):
+                    talent_target = tier_talent_points
+                else:
+                    talent_target = min(tier_talent_points, max_possible_talents)
+                
+                if talent_spent < talent_target * 0.95 or attr_spent < tier_attr_points * 0.95:
                     consecutive_dupes += 1
                     continue
                 
@@ -1613,11 +1628,16 @@ class HunterTab:
         # Sort by cost (prefer cheaper ones for efficiency)
         unlimited_attrs.sort(key=lambda a: attr_costs[a])
         
+        # Find unlimited talents for fallback
+        unlimited_talents = [t for t in talents_list if talent_max[t] == float('inf')]
+        
         # === ADD TALENT POINTS ===
         attempts = 0
         while talent_to_add > 0 and attempts < 1000:
             attempts += 1
-            valid = [t for t in talents_list if talents[t] < int(talent_max[t])]
+            # Find talents that can accept more points (handle inf max properly)
+            valid = [t for t in talents_list 
+                     if talent_max[t] == float('inf') or talents[t] < int(talent_max[t])]
             if not valid:
                 break
             chosen = random.choice(valid)

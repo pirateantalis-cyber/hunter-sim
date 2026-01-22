@@ -244,10 +244,10 @@ class BuildGenerator:
         
         # Point-by-point random allocation
         while remaining > 0:
-            # Find all talents that can still accept points
+            # Find all talents that can still accept points (handle inf max properly)
             valid_talents = [
                 t for t in talents 
-                if result[t] < int(max_levels[t])
+                if max_levels[t] == float('inf') or result[t] < int(max_levels[t])
             ]
             
             if not valid_talents:
@@ -2081,7 +2081,9 @@ This tells you upgrading Power will help you progress 1.24 more stages on averag
         talent_max = {t: generator.costs["talents"][t]["max"] for t in talents_list}
         
         while talent_to_add > 0:
-            valid = [t for t in talents_list if talents[t] < int(talent_max[t])]
+            # Handle unlimited talents (inf max) properly
+            valid = [t for t in talents_list 
+                     if talent_max[t] == float('inf') or talents[t] < int(talent_max[t])]
             if not valid:
                 break  # All talents maxed (shouldn't happen with enough capacity)
             chosen = random.choice(valid)

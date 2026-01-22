@@ -503,6 +503,10 @@ class Borge(Hunter):
                 "cost": 1,
                 "max": 15,
             },
+            "unknown_talent": { # Point dump for undiscovered talents - no effect
+                "cost": 1,
+                "max": float("inf"),
+            },
         },
         "attributes": {
             "soul_of_ares": { # x0.01 hp, x0.02 power
@@ -1145,6 +1149,10 @@ class Ozzy(Hunter):
                 "cost": 1,
                 "max": 15,
             },
+            "unknown_talent": { # Point dump for undiscovered talents - no effect
+                "cost": 1,
+                "max": float("inf"),
+            },
         },
         "attributes": {
             "living_off_the_land": { # x0.02 hp, x0.02 regen
@@ -1736,6 +1744,10 @@ class Knox(Hunter):
             "finishing_move": {  # +0.2x damage on last bullet of salvo
                 "cost": 1,
                 "max": 15,
+            },
+            "unknown_talent": {  # Point dump for undiscovered talents - no effect
+                "cost": 1,
+                "max": float("inf"),
             },
         },
         "attributes": {
