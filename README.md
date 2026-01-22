@@ -26,6 +26,8 @@ A high-performance build optimizer for the Interstellar Hunt content from CIFI (
 - 🟩 **Knox**: All talents and attributes, up to stage 200+
 
 ## 🚀 Quick Start
+Use the EXE! 
+But if you want to play with the code:
 
 ### Option 1: Run the GUI (Recommended)
 
