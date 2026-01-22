@@ -1,3 +1,9 @@
+# CIFI Tools files (downloaded for analysis, not ours)
+index-*.css
+index-*.js
+evaluationWorker-*.js
+release.wat
+
 # Logs and most builds
 logs/
 builds/*
