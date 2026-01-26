@@ -364,7 +364,7 @@ def simulate_python(config: Dict, num_sims: int = 100) -> Optional[SimData]:
             loot_c.append(result.get('loot_common', 0))
             loot_u.append(result.get('loot_uncommon', 0))
             loot_r.append(result.get('loot_rare', 0))
-            xps.append(result.get('xp', 0))
+            xps.append(result.get('total_xp', 0))  # Python uses 'total_xp' not 'xp'
         
         return SimData(
             backend='python',
